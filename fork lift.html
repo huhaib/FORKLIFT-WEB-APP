@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forklift Mobile</title>
+
+<style>
+body{margin:0;font-family:Arial;background:#f2f4f8;}
+header{background:#1e2a38;color:white;padding:14px;text-align:center;}
+.container{padding:12px;}
+.card{background:white;border-radius:12px;padding:15px;margin-bottom:15px;
+box-shadow:0 2px 8px rgba(0,0,0,0.08);}
+input,select{width:100%;padding:10px;margin:6px 0;border-radius:8px;border:1px solid #ccc;}
+button{padding:8px 12px;border-radius:6px;border:none;}
+.primary{background:#28a745;color:white;}
+.danger{background:#dc3545;color:white;}
+.secondary{background:#007bff;color:white;}
+.hidden{display:none;}
+
+.list-item{
+padding:10px;
+border-bottom:1px solid #eee;
+font-size:13px;
+display:flex;
+justify-content:space-between;
+align-items:center;
+}
+
+.status-normal{color:green;font-weight:bold;}
+.status-service{color:red;font-weight:bold;}
+
+.menu{
+display:flex;
+flex-wrap:wrap;
+gap:5px;
+margin-bottom:10px;
+}
+
+.menu button{
+flex:1 1 48%;
+font-size:12px;
+}
+
+/* NOTIFICATION */
+#notify{
+position:fixed;
+top:10px;
+left:50%;
+transform:translateX(-50%);
+background:#ff0000;
+color:white;
+padding:8px 16px;
+border-radius:6px;
+font-size:12px;
+z-index:999;
+}
+</style>
+</head>
+<body>
+
+<div id="notify" class="hidden">Loading...</div>
+
+<header>Forklift Dashboard</header>
+
+<!-- LOGIN -->
+<div id="loginPage" class="container">
+<div class="card">
+<h3>Login</h3>
+<input id="username" placeholder="Username">
+<input id="password" type="password" placeholder="Password">
+<button class="primary" onclick="login()">Login</button>
+<div id="errorMsg" style="color:red"></div>
+</div>
+</div>
+
+<!-- APP -->
+<div id="app" class="container hidden">
+
+<div class="menu">
+<button class="secondary" onclick="showPage('home')">Home</button>
+<button class="secondary" onclick="showPage('entry')">Entry</button>
+<button class="secondary" onclick="showPage('records')">Records</button>
+<button class="secondary" onclick="showPage('service')">Service</button>
+<button class="secondary" onclick="showPage('users')" id="manageBtn" style="display:none">
+Users
+</button>
+<button class="secondary" onclick="showPage('forks')" id="manageForkBtn" style="display:none">
+Forks
+</button>
+<button class="danger" onclick="logout()">Logout</button>
+</div>
+
+<!-- HOME -->
+<div id="homePage" class="card">
+<h3>Latest Status</h3>
+<div id="homeList"></div>
+</div>
+
+<!-- ENTRY -->
+<div id="entryPage" class="card hidden">
+<h3>New Entry</h3>
+<select id="forklift"></select>
+<input type="number" id="end" placeholder="Enter End">
+<button class="primary" onclick="saveEntry()">Save</button>
+<button class="danger" onclick="clearService()">Clear Service</button>
+</div>
+
+<!-- RECORDS -->
+<div id="recordsPage" class="card hidden">
+<h3>Records</h3>
+<select id="filterFork" onchange="loadData()">
+<option value="">All Forks</option>
+</select>
+
+<div id="recordsList"></div>
+</div>
+
+<!-- SERVICE -->
+<div id="servicePage" class="card hidden">
+<h3>Service Status</h3>
+<div id="serviceList"></div>
+</div>
+
+<!-- USERS PAGE -->
+<div id="usersPage" class="card hidden">
+<h3>User Management</h3>
+<div id="userList"></div>
+
+<h3>Add User</h3>
+<input id="newUser" placeholder="Username">
+<input id="newPass" type="password" placeholder="Password">
+<select id="newRole">
+<option value="USER">USER</option>
+<option value="ADMIN">ADMIN</option>
+<option value="VIEWER">VIEWER</option>
+</select>
+<button class="primary" onclick="addUser()">Add User</button>
+</div>
+
+<!-- FORKLIFT PAGE -->
+<div id="forksPage" class="card hidden">
+<h3>Forklift Management</h3>
+<div id="forkList"></div>
+
+<h3>Add Forklift</h3>
+<input id="newFork" placeholder="Fork Name">
+<button class="primary" onclick="addFork()">Add Forklift</button>
+</div>
+
+</div>
+
+<script>
+var scriptURL="https://script.google.com/macros/s/AKfycbzXm0ABCi1Ptj6L-EvYGwLieEsqOBpz7Q3NktOipccyZz-1KI8PHAgu3i-3JJFRL2ca/exec";
+var serviceLimit=250;
+var lastEndMap={};
+
+function showWait(msg){
+notify.innerHTML = msg;
+notify.classList.remove("hidden");
+}
+
+function hideWait(){
+notify.classList.add("hidden");
+}
+
+document.getElementById("password").addEventListener("keypress",function(e){
+if(e.key==="Enter") login();
+});
+
+function login(){
+showWait("Logging in...");
+fetch(scriptURL,{
+method:"POST",
+body:JSON.stringify({
+type:"login",
+username:username.value,
+password:password.value
+})
+})
+.then(res=>res.json())
+.then(data=>{
+hideWait();
+if(data.status=="success"){
+localStorage.setItem("username",username.value);
+localStorage.setItem("role",data.role);
+loadApp();
+}else{
+errorMsg.innerHTML="Invalid Login";
+}
+});
+}
+
+function loadApp(){
+loginPage.classList.add("hidden");
+app.classList.remove("hidden");
+
+let role = localStorage.getItem("role");
+if(role=="ADMIN"){
+manageBtn.style.display="block";
+manageForkBtn.style.display="block";
+}
+
+loadData();
+}
+
+function logout(){
+showWait("Logging out...");
+fetch(scriptURL,{
+method:"POST",
+body:JSON.stringify({type:"logout"})
+});
+localStorage.clear();
+location.reload();
+}
+
+function showPage(id){
+["home","entry","records","service","users","forks"].forEach(p=>{
+document.getElementById(p+"Page").classList.add("hidden");
+});
+document.getElementById(id+"Page").classList.remove("hidden");
+}
+
+function loadData(){
+showWait("Loading...");
+fetch(scriptURL)
+.then(res=>res.json())
+.then(data=>{
+
+forklift.innerHTML="";
+homeList.innerHTML="";
+recordsList.innerHTML="";
+serviceList.innerHTML="";
+userList.innerHTML="";
+forkList.innerHTML="";
+
+let lastStatus={};
+
+// FORKLIFT LIST
+data.forklifts.forEach(f=>{
+let opt=document.createElement("option");
+opt.value = f[0];
+opt.text = f[0];
+forklift.add(opt);
+});
+
+// FILTER
+filterFork.innerHTML="<option value=''>All Forks</option>";
+data.forklifts.forEach(f=>{
+let opt=document.createElement("option");
+opt.text=f[0];
+filterFork.add(opt);
+});
+
+// ENTRIES (NEW DATA TOP)
+data.entries.slice().reverse().forEach(r=>{
+lastEndMap[r[0]] = r[2];
+lastStatus[r[0]] = r[5];
+
+if(filterFork.value && r[0]!=filterFork.value) return;
+
+recordsList.innerHTML+=`
+<div class="list-item">
+<div>
+<b>${r[0]}</b><br>
+End: ${r[2]} | Diff: ${r[3]}<br>
+Status:
+<span class="${r[5]=='SERVICE REQUIRED'?'status-service':
+             r[5]=='COMPLETED'?'status-service':'status-normal'}">
+(${r[5]})
+</span>
+</div>
+
+${localStorage.getItem("role")=='ADMIN' ? `
+<button class="danger" onclick="deleteEntry('${r[0]}',${r[2]})">
+Delete
+</button>` : ``}
+
+</div>`;
+});
+
+// HOME & SERVICE
+for(let key in lastStatus){
+homeList.innerHTML+=`
+<div class="list-item">
+<b>${key}</b><br>
+Last End: ${lastEndMap[key]}<br>
+<span class="${lastStatus[key]=='SERVICE REQUIRED'?'status-service':'status-normal'}">
+${lastStatus[key]}
+</span>
+</div>`;
+
+serviceList.innerHTML+=`
+<div class="list-item">
+${key} :
+<span class="${lastStatus[key]=='SERVICE REQUIRED'?'status-service':'status-normal'}">
+${lastStatus[key]}
+</span>
+</div>`;
+}
+
+// USERS & FORKLIFTS (ADMIN)
+if(localStorage.getItem("role")=="ADMIN"){
+data.users.forEach(u=>{
+userList.innerHTML+=`
+<div class="list-item">
+<div>
+<b>${u[0]}</b><br>
+Role: ${u[2]} | Status: ${u[3]}
+</div>
+
+<div>
+<select onchange="changeRole('${u[0]}',this.value)">
+<option ${u[2]=='ADMIN'?'selected':''}>ADMIN</option>
+<option ${u[2]=='USER'?'selected':''}>USER</option>
+<option ${u[2]=='VIEWER'?'selected':''}>VIEWER</option>
+</select>
+<button class="danger" onclick="deleteUser('${u[0]}')">Delete</button>
+</div>
+</div>`;
+});
+
+data.forklifts.forEach(f=>{
+forkList.innerHTML+=`
+<div class="list-item">
+<div>${f[0]}</div>
+<button class="danger" onclick="deleteFork('${f[0]}')">Delete</button>
+</div>`;
+});
+}
+
+hideWait();
+});
+}
+
+function saveEntry(){
+if(localStorage.getItem("role")=="VIEWER"){
+alert("View Only");
+return;
+}
+
+let e=parseFloat(end.value);
+let last = lastEndMap[forklift.value] || 0;
+if(e<=last){ alert("Greater than "+last); return; }
+
+let diff = e-last;
+let total = diff;
+let status = total>serviceLimit?"SERVICE REQUIRED":"NORMAL";
+
+showWait("Saving...");
+fetch(scriptURL,{
+method:"POST",
+body:JSON.stringify({
+type:"entry",
+forklift:forklift.value,
+end:e,
+diff:diff,
+total:total,
+status:status
+})
+}).then(()=>{
+hideWait();
+end.value="";
+loadData();
+});
+}
+
+function clearService(){
+if(localStorage.getItem("role")!="ADMIN"){ alert("Admin Only"); return; }
+
+let base = parseFloat(end.value);
+if(!base){ alert("Enter End"); return; }
+
+showWait("Updating...");
+fetch(scriptURL,{
+method:"POST",
+body:JSON.stringify({
+type:"service",
+forklift:forklift.value,
+base:base
+})
+}).then(()=>{
+hideWait();
+alert("Service Completed");
+end.value="";
+loadData();
+});
+}
+
+function addUser(){
+showWait("Saving...");
+fetch(scriptURL,{
+method:"POST",
+body:JSON.stringify({
+type:"addUser",
+username:newUser.value,
+password:newPass.value,
+role:newRole.value
+})
+}).then(()=>{
+hideWait();
+newUser.value="";
+newPass.value="";
+loadData();
+});
+}
+
+function addFork(){
+showWait("Saving...");
+fetch(scriptURL,{
+method:"POST",
+body:JSON.stringify({
+type:"addFork",
+forklift:newFork.value
+})
+}).then(()=>{
+hideWait();
+newFork.value="";
+loadData();
+});
+}
+
+function changeRole(user,role){
+showWait("Updating...");
+fetch(scriptURL,{
+method:"POST",
+body:JSON.stringify({
+type:"changeRole",
+username:user,
+role:role
+})
+}).then(()=>{
+hideWait();
+loadData();
+});
+}
+
+function deleteEntry(fork,end){
+if(localStorage.getItem("role")!="ADMIN"){ alert("Admin Only"); return; }
+if(!confirm("Delete?")) return;
+
+showWait("Deleting...");
+fetch(scriptURL,{
+method:"POST",
+body:JSON.stringify({
+type:"delete",
+forklift:fork,
+end:end
+})
+}).then(()=>{
+hideWait();
+loadData();
+});
+}
+</script>
+
+</body>
+</html>
